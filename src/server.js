@@ -1,4 +1,4 @@
-// server.js ✅ UPDATED FILE (Stripe webhook-safe + no-crash if Stripe env missing)
+// server.js ✅ UPDATED for Render + Netlify (CORS fixed)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,17 +7,33 @@ require('dotenv').config();
 
 const app = express();
 
-// ✅ CORS (Angular dev server)
+// ✅ Render/Netlify behind proxy (good practice)
+app.set('trust proxy', 1);
+
+// ✅ CORS (ALLOW Netlify + local)
+// Put your Netlify URL in CLIENT_URL on Render, example:
+// CLIENT_URL=https://your-site.netlify.app
+const allowedOrigins = [
+  'http://localhost:4200',
+  process.env.CLIENT_URL, // ✅ Netlify url
+].filter(Boolean);
+
 app.use(
   cors({
-    origin: ['http://localhost:4200'],
+    origin: function (origin, cb) {
+      // allow non-browser requests (like curl/postman) with no origin
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+    },
     credentials: true,
   })
 );
 
-// ✅ IMPORTANT: Stripe webhook needs RAW body, so mount raw parser ONLY for webhook route BEFORE json()
-// (but only if payments routes are enabled)
-const STRIPE_ENABLED = !!(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET);
+// ✅ Stripe webhook needs RAW body BEFORE json()
+const STRIPE_ENABLED = !!(
+  process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET
+);
 if (STRIPE_ENABLED) {
   app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 }
@@ -25,15 +41,17 @@ if (STRIPE_ENABLED) {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ Serve uploaded images
+// ✅ Serve uploaded images (NOTE: Render disk is ephemeral; GridFS is better)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ✅ Disable ETag so Express never replies with 304 for API
 app.disable('etag');
 
-// ✅ Force no-cache headers for all API responses
+// optional cache headers (fine)
 app.use((req, res, next) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader(
+    'Cache-Control',
+    'no-store, no-cache, must-revalidate, proxy-revalidate'
+  );
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.setHeader('Surrogate-Control', 'no-store');
@@ -46,11 +64,12 @@ app.use('/api/events', require('./routes/event.routes'));
 app.use('/api/bookings', require('./routes/booking.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
 
-// ✅ Stripe payments routes (enable only if env present)
 if (STRIPE_ENABLED) {
   app.use('/api/payments', require('./routes/payment.routes'));
 } else {
-  console.warn('⚠️ Stripe disabled: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET missing. Payments routes not mounted.');
+  console.warn(
+    '⚠️ Stripe disabled: STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET missing. Payments routes not mounted.'
+  );
 }
 
 // health check
@@ -69,19 +88,15 @@ const PORT = process.env.PORT || 5000;
 async function start() {
   try {
     if (!process.env.MONGO_URI) {
-      console.error('❌ MONGO_URI missing in .env');
+      console.error('❌ MONGO_URI missing in env');
       process.exit(1);
     }
     if (!process.env.JWT_SECRET) {
-      console.error('❌ JWT_SECRET missing in .env');
+      console.error('❌ JWT_SECRET missing in env');
       process.exit(1);
     }
 
-    // ✅ CLIENT_URL only used for Stripe flows; warn only
-    if (!process.env.CLIENT_URL) {
-      console.warn('⚠️ CLIENT_URL missing in .env (recommended: http://localhost:4200)');
-    }
-
+    // ✅ Connect (works with mongoose 6/7/8)
     await mongoose.connect(process.env.MONGO_URI);
     console.log('✅ MongoDB connected');
 
