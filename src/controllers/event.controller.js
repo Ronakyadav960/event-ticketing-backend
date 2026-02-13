@@ -11,8 +11,48 @@ function getBucket() {
   return new GridFSBucket(mongoose.connection.db, { bucketName: 'eventImages' });
 }
 
+/**
+ * ✅ Use stable base URL in production
+ * Render env: BASE_URL=https://event-ticketing-backend-1.onrender.com
+ * Fallback: req protocol + host
+ */
+function getBaseUrl(req) {
+  const envBase = (process.env.BASE_URL || '').trim();
+  if (envBase) return envBase.replace(/\/+$/, '');
+  return `${req.protocol}://${req.get('host')}`;
+}
+
 function buildImageUrl(req, eventId) {
-  return `${req.protocol}://${req.get('host')}/api/events/${eventId}/image`;
+  const base = getBaseUrl(req);
+  return `${base}/api/events/${eventId}/image`;
+}
+
+/**
+ * ✅ Normalize imageUrl:
+ * - If imageFileId exists => always serve via /api/events/:id/image
+ * - If imageUrl stored with localhost => replace with BASE_URL
+ * - If imageUrl relative => prefix with BASE_URL
+ */
+function normalizeEventImageUrl(req, obj) {
+  const base = getBaseUrl(req);
+
+  // If GridFS image exists, always use the proxy endpoint
+  if (obj.imageFileId) {
+    obj.imageUrl = buildImageUrl(req, obj._id);
+    return obj;
+  }
+
+  if (!obj.imageUrl) return obj;
+
+  // Replace localhost if old data saved
+  obj.imageUrl = String(obj.imageUrl)
+    .replace(/^http:\/\/localhost:5000/i, base)
+    .replace(/^https?:\/\/localhost:5000/i, base);
+
+  // If relative path, prefix base
+  if (obj.imageUrl.startsWith('/')) obj.imageUrl = `${base}${obj.imageUrl}`;
+
+  return obj;
 }
 
 // ✅ upload buffer to GridFS manually (no multer-gridfs-storage)
@@ -67,6 +107,7 @@ exports.createEvent = async (req, res) => {
       totalSeats: Number(totalSeats),
       bookedSeats: 0,
       imageFileId,
+      // ✅ IMPORTANT: don't store localhost; store correct URL
       imageUrl: imageFileId ? buildImageUrl(req, null) : '',
     });
 
@@ -76,7 +117,10 @@ exports.createEvent = async (req, res) => {
       await event.save();
     }
 
-    return res.status(201).json(event);
+    const obj = event.toObject();
+    normalizeEventImageUrl(req, obj);
+
+    return res.status(201).json(obj);
   } catch (error) {
     console.error('CREATE EVENT ERROR ❌', error);
     return res.status(500).json({ message: 'Server error while creating event' });
@@ -92,9 +136,7 @@ exports.getAllEvents = async (req, res) => {
 
     const mapped = events.map((ev) => {
       const obj = ev.toObject();
-      if (obj.imageFileId && !obj.imageUrl) {
-        obj.imageUrl = buildImageUrl(req, obj._id);
-      }
+      normalizeEventImageUrl(req, obj);
       return obj;
     });
 
@@ -117,9 +159,7 @@ exports.getEventById = async (req, res) => {
     }
 
     const obj = event.toObject();
-    if (obj.imageFileId && !obj.imageUrl) {
-      obj.imageUrl = buildImageUrl(req, obj._id);
-    }
+    normalizeEventImageUrl(req, obj);
 
     return res.json(obj);
   } catch (error) {
@@ -162,7 +202,10 @@ exports.updateEvent = async (req, res) => {
     }
 
     const updated = await event.save();
-    return res.json(updated);
+    const obj = updated.toObject();
+    normalizeEventImageUrl(req, obj);
+
+    return res.json(obj);
   } catch (error) {
     console.error('UPDATE EVENT ERROR ❌', error);
     return res.status(400).json({ message: 'Update failed' });
