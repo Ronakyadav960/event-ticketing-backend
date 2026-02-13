@@ -1,4 +1,4 @@
-// server.js ✅ UPDATED for Render + Cloudflare Pages (CORS fixed)
+// server.js ✅ UPDATED for Render + Vercel/Cloudflare (CORS fixed)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,31 +7,41 @@ require('dotenv').config();
 
 const app = express();
 
-// ✅ Render/Cloudflare behind proxy (good practice)
+// ✅ Render/Vercel behind proxy (good practice)
 app.set('trust proxy', 1);
 
-// ✅ CORS (ALLOW Cloudflare Pages + local)
-// Put your Cloudflare Pages URL in CLIENT_URL on Render, example:
-// CLIENT_URL=https://your-site.pages.dev
+/**
+ * ✅ CORS
+ * Render env me CLIENT_URL set karo (comma separated allowed):
+ * CLIENT_URL=https://event-ticketing-frontend-hjlg.vercel.app,https://your.pages.dev,http://localhost:4200
+ */
 const allowedOrigins = [
   'http://localhost:4200',
-  process.env.CLIENT_URL, // ✅ Cloudflare Pages url
+  ...(process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(',').map((s) => s.trim())
+    : []),
 ].filter(Boolean);
 
 app.use(
   cors({
     origin: function (origin, cb) {
-      // allow non-browser requests (like curl/postman) with no origin
+      // allow non-browser requests (curl/postman) with no origin
       if (!origin) return cb(null, true);
+
+      // allow only whitelisted origins
       if (allowedOrigins.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked for origin: ${origin}`), false);
+
+      // ❗ IMPORTANT: error throw mat karo, warna preflight me headers nahi jaate
+      return cb(null, false);
     },
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 
-// ✅ Preflight handling (FIX: Express/path-to-regexp doesn't like '*')
-app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
+// ✅ Preflight handling (Express/path-to-regexp safe)
+app.options(/.*/, cors());
 
 // ✅ Stripe webhook needs RAW body BEFORE json()
 const STRIPE_ENABLED = !!(
