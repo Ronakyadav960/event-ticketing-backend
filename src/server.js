@@ -30,8 +30,8 @@ app.use(
   })
 );
 
-// ✅ Preflight handling (important for browsers)
-app.options('*', cors({ origin: allowedOrigins, credentials: true }));
+// ✅ Preflight handling (FIX: Express/path-to-regexp doesn't like '*')
+app.options(/.*/, cors({ origin: allowedOrigins, credentials: true }));
 
 // ✅ Stripe webhook needs RAW body BEFORE json()
 const STRIPE_ENABLED = !!(
