@@ -1,4 +1,4 @@
-// server.js ✅ UPDATED for Render + Netlify (CORS fixed)
+// server.js ✅ UPDATED for Render + Cloudflare Pages (CORS fixed)
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -7,15 +7,15 @@ require('dotenv').config();
 
 const app = express();
 
-// ✅ Render/Netlify behind proxy (good practice)
+// ✅ Render/Cloudflare behind proxy (good practice)
 app.set('trust proxy', 1);
 
-// ✅ CORS (ALLOW Netlify + local)
-// Put your Netlify URL in CLIENT_URL on Render, example:
-// CLIENT_URL=https://your-site.netlify.app
+// ✅ CORS (ALLOW Cloudflare Pages + local)
+// Put your Cloudflare Pages URL in CLIENT_URL on Render, example:
+// CLIENT_URL=https://your-site.pages.dev
 const allowedOrigins = [
   'http://localhost:4200',
-  process.env.CLIENT_URL, // ✅ Netlify url
+  process.env.CLIENT_URL, // ✅ Cloudflare Pages url
 ].filter(Boolean);
 
 app.use(
@@ -29,6 +29,9 @@ app.use(
     credentials: true,
   })
 );
+
+// ✅ Preflight handling (important for browsers)
+app.options('*', cors({ origin: allowedOrigins, credentials: true }));
 
 // ✅ Stripe webhook needs RAW body BEFORE json()
 const STRIPE_ENABLED = !!(

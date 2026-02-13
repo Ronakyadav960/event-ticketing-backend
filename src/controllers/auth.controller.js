@@ -2,12 +2,17 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
+// helper
+function normalizeEmail(v) {
+  return (v || '').trim().toLowerCase();
+}
+
 // ================= REGISTER =================
 exports.register = async (req, res) => {
   try {
     const name = (req.body.name || '').trim();
-    const email = (req.body.email || '').trim().toLowerCase();
-    const password = (req.body.password || '').trim();
+    const email = normalizeEmail(req.body.email);
+    const password = req.body.password || ''; // ✅ DO NOT trim password
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, password are required' });
@@ -15,7 +20,7 @@ exports.register = async (req, res) => {
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ message: 'User already exists' });
+      return res.status(409).json({ message: 'User already exists' }); // ✅ better status
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -38,6 +43,12 @@ exports.register = async (req, res) => {
     });
   } catch (err) {
     console.error('REGISTER ERROR:', err);
+
+    // ✅ handle duplicate key just in case
+    if (err && err.code === 11000) {
+      return res.status(409).json({ message: 'User already exists' });
+    }
+
     return res.status(500).json({ message: 'Registration failed' });
   }
 };
@@ -45,22 +56,32 @@ exports.register = async (req, res) => {
 // ================= LOGIN =================
 exports.login = async (req, res) => {
   try {
-    const email = (req.body.email || '').trim().toLowerCase();
-    const password = (req.body.password || '').trim();
+    const email = normalizeEmail(req.body.email);
+    const password = req.body.password || ''; // ✅ DO NOT trim password
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
+    if (!process.env.JWT_SECRET) {
+      console.error('❌ JWT_SECRET missing in env');
+      return res.status(500).json({ message: 'Server misconfigured (JWT_SECRET missing)' });
+    }
+
     // ✅ because password is select:false in schema
     const user = await User.findOne({ email }).select('+password');
+
+    // ✅ return same message for security + consistent frontend
     if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+      // optional debug:
+      console.warn('LOGIN: user not found for email:', email);
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      console.warn('LOGIN: password mismatch for email:', email);
+      return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const token = jwt.sign(
