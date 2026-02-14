@@ -28,15 +28,11 @@ function buildImageUrl(req, eventId) {
 }
 
 /**
- * ✅ Normalize imageUrl:
- * - If imageFileId exists => always serve via /api/events/:id/image
- * - If imageUrl stored with localhost => replace with BASE_URL
- * - If imageUrl relative => prefix with BASE_URL
+ * ✅ Normalize imageUrl
  */
 function normalizeEventImageUrl(req, obj) {
   const base = getBaseUrl(req);
 
-  // If GridFS image exists, always use the proxy endpoint
   if (obj.imageFileId) {
     obj.imageUrl = buildImageUrl(req, obj._id);
     return obj;
@@ -44,18 +40,15 @@ function normalizeEventImageUrl(req, obj) {
 
   if (!obj.imageUrl) return obj;
 
-  // Replace localhost if old data saved
   obj.imageUrl = String(obj.imageUrl)
     .replace(/^http:\/\/localhost:5000/i, base)
     .replace(/^https?:\/\/localhost:5000/i, base);
 
-  // If relative path, prefix base
   if (obj.imageUrl.startsWith('/')) obj.imageUrl = `${base}${obj.imageUrl}`;
 
   return obj;
 }
 
-// ✅ upload buffer to GridFS manually (no multer-gridfs-storage)
 async function uploadBufferToGridFS(file) {
   const bucket = getBucket();
   if (!bucket) throw new Error('MongoDB not connected');
@@ -81,7 +74,7 @@ async function uploadBufferToGridFS(file) {
 }
 
 // =======================
-// CREATE EVENT (ADMIN)
+// CREATE EVENT
 // =======================
 exports.createEvent = async (req, res) => {
   try {
@@ -93,7 +86,6 @@ exports.createEvent = async (req, res) => {
 
     let imageFileId = null;
 
-    // ✅ if image uploaded, store in GridFS
     if (req.file) {
       imageFileId = await uploadBufferToGridFS(req.file);
     }
@@ -107,11 +99,9 @@ exports.createEvent = async (req, res) => {
       totalSeats: Number(totalSeats),
       bookedSeats: 0,
       imageFileId,
-      // ✅ IMPORTANT: don't store localhost; store correct URL
       imageUrl: imageFileId ? buildImageUrl(req, null) : '',
     });
 
-    // now we have event._id so finalize imageUrl
     if (imageFileId) {
       event.imageUrl = buildImageUrl(req, event._id);
       await event.save();
@@ -128,7 +118,7 @@ exports.createEvent = async (req, res) => {
 };
 
 // =======================
-// GET ALL EVENTS (PUBLIC)
+// GET ALL EVENTS
 // =======================
 exports.getAllEvents = async (req, res) => {
   try {
@@ -148,7 +138,7 @@ exports.getAllEvents = async (req, res) => {
 };
 
 // =======================
-// GET EVENT BY ID (PUBLIC)
+// GET EVENT BY ID
 // =======================
 exports.getEventById = async (req, res) => {
   try {
@@ -169,7 +159,36 @@ exports.getEventById = async (req, res) => {
 };
 
 // =======================
-// UPDATE EVENT (ADMIN)
+// ✅ SERVE EVENT IMAGE (FIX ADDED)
+// =======================
+exports.getEventImage = async (req, res) => {
+  try {
+    const bucket = getBucket();
+    if (!bucket) {
+      return res.status(500).json({ message: 'Image storage not available' });
+    }
+
+    const event = await Event.findById(req.params.id);
+    if (!event || !event.imageFileId) {
+      return res.status(404).json({ message: 'Image not found' });
+    }
+
+    const fileId = new mongoose.Types.ObjectId(event.imageFileId);
+    const downloadStream = bucket.openDownloadStream(fileId);
+
+    downloadStream.on('error', () => {
+      return res.status(404).json({ message: 'Image not found' });
+    });
+
+    downloadStream.pipe(res);
+  } catch (error) {
+    console.error('GET EVENT IMAGE ERROR ❌', error);
+    return res.status(400).json({ message: 'Invalid image request' });
+  }
+};
+
+// =======================
+// UPDATE EVENT
 // =======================
 exports.updateEvent = async (req, res) => {
   try {
@@ -183,18 +202,14 @@ exports.updateEvent = async (req, res) => {
     if (req.body.price != null) event.price = Number(req.body.price);
     if (req.body.totalSeats != null) event.totalSeats = Number(req.body.totalSeats);
 
-    // ✅ if new image uploaded -> upload to GridFS and replace old
     if (req.file) {
       const newId = await uploadBufferToGridFS(req.file);
 
-      // (optional) delete old image from GridFS
       if (event.imageFileId) {
         try {
           const bucket = getBucket();
           bucket && (await bucket.delete(new mongoose.Types.ObjectId(event.imageFileId)));
-        } catch (e) {
-          // ignore delete failures
-        }
+        } catch (e) {}
       }
 
       event.imageFileId = newId;
@@ -213,7 +228,7 @@ exports.updateEvent = async (req, res) => {
 };
 
 // =======================
-// DELETE EVENT (ADMIN)
+// DELETE EVENT
 // =======================
 exports.deleteEvent = async (req, res) => {
   try {
@@ -231,7 +246,7 @@ exports.deleteEvent = async (req, res) => {
 };
 
 // =======================
-// BOOK SEATS (LOGGED IN USER)
+// BOOK SEATS
 // =======================
 exports.bookSeats = async (req, res) => {
   try {
