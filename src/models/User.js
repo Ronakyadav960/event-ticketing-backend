@@ -2,7 +2,11 @@ const mongoose = require('mongoose');
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, trim: true, required: true },
+    name: { 
+      type: String, 
+      trim: true, 
+      required: true 
+    },
 
     email: {
       type: String,
@@ -13,13 +17,18 @@ const userSchema = new mongoose.Schema(
     },
 
     // ✅ password should not be returned by default
-    password: { type: String, required: true, select: false },
+    password: { 
+      type: String, 
+      required: true, 
+      select: false 
+    },
 
     role: {
       type: String,
-      enum: ['admin', 'user'],
+      enum: ['user', 'creator', 'superadmin'],  // ✅ UPDATED
       default: 'user',
     },
+
   },
   { timestamps: true }
 );

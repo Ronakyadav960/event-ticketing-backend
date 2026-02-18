@@ -13,6 +13,7 @@ exports.register = async (req, res) => {
     const name = (req.body.name || '').trim();
     const email = normalizeEmail(req.body.email);
     const password = req.body.password || ''; // ✅ DO NOT trim password
+    const role = (req.body.role || '').trim().toLowerCase();
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email, password are required' });
@@ -20,16 +21,19 @@ exports.register = async (req, res) => {
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(409).json({ message: 'User already exists' }); // ✅ better status
+      return res.status(409).json({ message: 'User already exists' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+
+    // ✅ Allow only user or creator from frontend
+    const allowedRole = role === 'creator' ? 'creator' : 'user';
 
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
-      role: 'user', // 🔒 force user role
+      role: allowedRole,
     });
 
     return res.status(201).json({
@@ -44,7 +48,6 @@ exports.register = async (req, res) => {
   } catch (err) {
     console.error('REGISTER ERROR:', err);
 
-    // ✅ handle duplicate key just in case
     if (err && err.code === 11000) {
       return res.status(409).json({ message: 'User already exists' });
     }
@@ -57,7 +60,7 @@ exports.register = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const email = normalizeEmail(req.body.email);
-    const password = req.body.password || ''; // ✅ DO NOT trim password
+    const password = req.body.password || '';
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
@@ -68,24 +71,22 @@ exports.login = async (req, res) => {
       return res.status(500).json({ message: 'Server misconfigured (JWT_SECRET missing)' });
     }
 
-    // ✅ because password is select:false in schema
     const user = await User.findOne({ email }).select('+password');
 
-    // ✅ return same message for security + consistent frontend
     if (!user) {
-      // optional debug:
-      console.warn('LOGIN: user not found for email:', email);
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      console.warn('LOGIN: password mismatch for email:', email);
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
     const token = jwt.sign(
-      { id: user._id.toString(), role: user.role },
+      { 
+        id: user._id.toString(), 
+        role: user.role 
+      },
       process.env.JWT_SECRET,
       { expiresIn: '1d' }
     );

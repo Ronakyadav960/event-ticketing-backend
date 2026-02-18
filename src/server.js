@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 
@@ -71,6 +72,8 @@ app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/events', require('./routes/event.routes'));
 app.use('/api/bookings', require('./routes/booking.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
+app.use('/api/dashboard', require('./routes/dashboard.routes'));
+
 
 // ✅ IMPORTANT FIX: Always mount payments route
 app.use('/api/payments', require('./routes/payment.routes'));

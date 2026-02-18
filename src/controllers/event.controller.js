@@ -6,56 +6,30 @@ const path = require('path');
 
 const Event = require('../models/Event');
 
+// =======================
+// GridFS Helper
+// =======================
 function getBucket() {
   if (!mongoose.connection?.db) return null;
   return new GridFSBucket(mongoose.connection.db, { bucketName: 'eventImages' });
 }
 
-/**
- * ✅ Use stable base URL in production
- * Render env: BASE_URL=https://event-ticketing-backend-1.onrender.com
- * Fallback: req protocol + host
- */
+// =======================
+// URL Helpers
+// =======================
 function getBaseUrl(req) {
   const envBase = (process.env.BASE_URL || '').trim();
   if (envBase) return envBase.replace(/\/+$/, '');
   return `${req.protocol}://${req.get('host')}`;
 }
 
-function buildImageUrl(req, eventId) {
-  const base = getBaseUrl(req);
-  return `${base}/api/events/${eventId}/image`;
+function buildImagePath(eventId) {
+  return `/api/events/${eventId}/image`;
 }
 
-/**
- * ✅ Normalize imageUrl:
- * - If imageFileId exists => always serve via /api/events/:id/image
- * - If imageUrl stored with localhost => replace with BASE_URL
- * - If imageUrl relative => prefix with BASE_URL
- */
-function normalizeEventImageUrl(req, obj) {
-  const base = getBaseUrl(req);
-
-  // If GridFS image exists, always use the proxy endpoint
-  if (obj.imageFileId) {
-    obj.imageUrl = buildImageUrl(req, obj._id);
-    return obj;
-  }
-
-  if (!obj.imageUrl) return obj;
-
-  // Replace localhost if old data saved
-  obj.imageUrl = String(obj.imageUrl)
-    .replace(/^http:\/\/localhost:5000/i, base)
-    .replace(/^https?:\/\/localhost:5000/i, base);
-
-  // If relative path, prefix base
-  if (obj.imageUrl.startsWith('/')) obj.imageUrl = `${base}${obj.imageUrl}`;
-
-  return obj;
-}
-
-// ✅ upload buffer to GridFS manually (no multer-gridfs-storage)
+// =======================
+// Upload Buffer to GridFS
+// =======================
 async function uploadBufferToGridFS(file) {
   const bucket = getBucket();
   if (!bucket) throw new Error('MongoDB not connected');
@@ -67,10 +41,6 @@ async function uploadBufferToGridFS(file) {
   return await new Promise((resolve, reject) => {
     const uploadStream = bucket.openUploadStream(filename, {
       contentType: file.mimetype,
-      metadata: {
-        originalName: file.originalname,
-        mimeType: file.mimetype,
-      },
     });
 
     uploadStream.on('error', reject);
@@ -81,10 +51,14 @@ async function uploadBufferToGridFS(file) {
 }
 
 // =======================
-// CREATE EVENT (ADMIN)
+// CREATE EVENT
 // =======================
 exports.createEvent = async (req, res) => {
   try {
+    if (!req.user || !['creator', 'superadmin'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Not authorized to create events' });
+    }
+
     const { title, description, date, venue, price, totalSeats } = req.body;
 
     if (!title || !date || !venue || price == null || totalSeats == null) {
@@ -93,7 +67,6 @@ exports.createEvent = async (req, res) => {
 
     let imageFileId = null;
 
-    // ✅ if image uploaded, store in GridFS
     if (req.file) {
       imageFileId = await uploadBufferToGridFS(req.file);
     }
@@ -106,21 +79,18 @@ exports.createEvent = async (req, res) => {
       price: Number(price),
       totalSeats: Number(totalSeats),
       bookedSeats: 0,
+      createdBy: req.user.id, // 🔥 ownership
       imageFileId,
-      // ✅ IMPORTANT: don't store localhost; store correct URL
-      imageUrl: imageFileId ? buildImageUrl(req, null) : '',
+      imageUrl: imageFileId ? buildImagePath(undefined) : '',
     });
 
-    // now we have event._id so finalize imageUrl
     if (imageFileId) {
-      event.imageUrl = buildImageUrl(req, event._id);
+      event.imageUrl = buildImagePath(event._id);
       await event.save();
     }
 
-    const obj = event.toObject();
-    normalizeEventImageUrl(req, obj);
+    return res.status(201).json(event);
 
-    return res.status(201).json(obj);
   } catch (error) {
     console.error('CREATE EVENT ERROR ❌', error);
     return res.status(500).json({ message: 'Server error while creating event' });
@@ -133,14 +103,7 @@ exports.createEvent = async (req, res) => {
 exports.getAllEvents = async (req, res) => {
   try {
     const events = await Event.find().sort({ date: 1 });
-
-    const mapped = events.map((ev) => {
-      const obj = ev.toObject();
-      normalizeEventImageUrl(req, obj);
-      return obj;
-    });
-
-    return res.json(mapped);
+    return res.json(events);
   } catch (error) {
     console.error('GET ALL EVENTS ERROR ❌', error);
     return res.status(500).json({ message: 'Failed to fetch events' });
@@ -148,7 +111,25 @@ exports.getAllEvents = async (req, res) => {
 };
 
 // =======================
-// GET EVENT BY ID (PUBLIC)
+// GET MY EVENTS (CREATOR)
+// =======================
+exports.getMyEvents = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'creator') {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+
+    const events = await Event.find({ createdBy: req.user.id });
+    return res.json(events);
+
+  } catch (error) {
+    console.error('GET MY EVENTS ERROR ❌', error);
+    return res.status(500).json({ message: 'Failed to fetch events' });
+  }
+};
+
+// =======================
+// GET EVENT BY ID
 // =======================
 exports.getEventById = async (req, res) => {
   try {
@@ -158,10 +139,8 @@ exports.getEventById = async (req, res) => {
       return res.status(404).json({ message: 'Event not found' });
     }
 
-    const obj = event.toObject();
-    normalizeEventImageUrl(req, obj);
+    return res.json(event);
 
-    return res.json(obj);
   } catch (error) {
     console.error('GET EVENT BY ID ERROR ❌', error);
     return res.status(400).json({ message: 'Invalid event ID' });
@@ -169,12 +148,20 @@ exports.getEventById = async (req, res) => {
 };
 
 // =======================
-// UPDATE EVENT (ADMIN)
+// UPDATE EVENT
 // =======================
 exports.updateEvent = async (req, res) => {
   try {
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
+
+    // 🔒 Ownership Check
+    if (
+      req.user.role === 'creator' &&
+      event.createdBy.toString() !== req.user.id
+    ) {
+      return res.status(403).json({ message: 'Not authorized to update this event' });
+    }
 
     if (req.body.title != null) event.title = String(req.body.title).trim();
     if (req.body.description != null) event.description = String(req.body.description).trim();
@@ -183,29 +170,15 @@ exports.updateEvent = async (req, res) => {
     if (req.body.price != null) event.price = Number(req.body.price);
     if (req.body.totalSeats != null) event.totalSeats = Number(req.body.totalSeats);
 
-    // ✅ if new image uploaded -> upload to GridFS and replace old
     if (req.file) {
       const newId = await uploadBufferToGridFS(req.file);
-
-      // (optional) delete old image from GridFS
-      if (event.imageFileId) {
-        try {
-          const bucket = getBucket();
-          bucket && (await bucket.delete(new mongoose.Types.ObjectId(event.imageFileId)));
-        } catch (e) {
-          // ignore delete failures
-        }
-      }
-
       event.imageFileId = newId;
-      event.imageUrl = buildImageUrl(req, event._id);
+      event.imageUrl = buildImagePath(event._id);
     }
 
-    const updated = await event.save();
-    const obj = updated.toObject();
-    normalizeEventImageUrl(req, obj);
+    await event.save();
+    return res.json(event);
 
-    return res.json(obj);
   } catch (error) {
     console.error('UPDATE EVENT ERROR ❌', error);
     return res.status(400).json({ message: 'Update failed' });
@@ -213,17 +186,23 @@ exports.updateEvent = async (req, res) => {
 };
 
 // =======================
-// DELETE EVENT (ADMIN)
+// DELETE EVENT
 // =======================
 exports.deleteEvent = async (req, res) => {
   try {
-    const deleted = await Event.findByIdAndDelete(req.params.id);
+    const event = await Event.findById(req.params.id);
+    if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    if (!deleted) {
-      return res.status(404).json({ message: 'Event not found' });
+    if (
+      req.user.role === 'creator' &&
+      event.createdBy.toString() !== req.user.id
+    ) {
+      return res.status(403).json({ message: 'Not authorized to delete this event' });
     }
 
+    await event.deleteOne();
     return res.json({ message: 'Event deleted successfully' });
+
   } catch (error) {
     console.error('DELETE EVENT ERROR ❌', error);
     return res.status(400).json({ message: 'Delete failed' });
@@ -231,10 +210,14 @@ exports.deleteEvent = async (req, res) => {
 };
 
 // =======================
-// BOOK SEATS (LOGGED IN USER)
+// BOOK SEATS (USER)
 // =======================
 exports.bookSeats = async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Login required' });
+    }
+
     const seats = Number(req.body.seats);
 
     if (!seats || seats < 1) {
@@ -244,14 +227,13 @@ exports.bookSeats = async (req, res) => {
     const event = await Event.findById(req.params.id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    const booked = event.bookedSeats ?? 0;
-    const remaining = event.totalSeats - booked;
+    const remaining = event.totalSeats - event.bookedSeats;
 
     if (seats > remaining) {
       return res.status(400).json({ message: 'Not enough seats available' });
     }
 
-    event.bookedSeats = booked + seats;
+    event.bookedSeats += seats;
     await event.save();
 
     return res.json({
@@ -259,6 +241,7 @@ exports.bookSeats = async (req, res) => {
       bookedSeats: event.bookedSeats,
       remainingSeats: event.totalSeats - event.bookedSeats,
     });
+
   } catch (error) {
     console.error('BOOK SEATS ERROR ❌', error);
     return res.status(500).json({ message: 'Booking failed' });

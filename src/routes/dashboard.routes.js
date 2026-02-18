@@ -1,11 +1,20 @@
 const express = require('express');
 const router = express.Router();
+const { protect, authorizeRoles } = require('../middlewares/auth.middleware');
 
-router.get('/', (req, res) => {
+// TEMP TEST ROUTES
+
+router.get('/creator', protect, authorizeRoles('creator', 'superadmin'), (req, res) => {
   res.json({
-    totalEvents: 0,
-    totalBookings: 0,
-    message: 'Dashboard API working'
+    message: 'Creator dashboard working',
+    user: req.user
+  });
+});
+
+router.get('/superadmin', protect, authorizeRoles('superadmin'), (req, res) => {
+  res.json({
+    message: 'Superadmin dashboard working',
+    user: req.user
   });
 });
 
