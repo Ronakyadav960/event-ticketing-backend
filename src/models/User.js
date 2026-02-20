@@ -23,12 +23,12 @@ const userSchema = new mongoose.Schema(
       select: false 
     },
 
-    role: {
-      type: String,
-      enum: ['user', 'creator', 'superadmin'],  // ✅ UPDATED
-      default: 'user',
-    },
-
+   role: {
+  type: String,
+  enum: ['user', 'creator', 'superadmin'],
+  lowercase: true,
+  required: true
+}
   },
   { timestamps: true }
 );

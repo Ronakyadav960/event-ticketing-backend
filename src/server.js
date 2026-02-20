@@ -68,7 +68,7 @@ app.use((req, res, next) => {
 });
 
 // ✅ ROUTES
-app.use('/api/auth', require('./routes/auth.routes'));
+app.use('/api/auth', require('./routes/auth.routes'));                              
 app.use('/api/events', require('./routes/event.routes'));
 app.use('/api/bookings', require('./routes/booking.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
