@@ -51,7 +51,6 @@ const eventSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true, // ⚡ improves creator dashboard performance
     },
 
     // Image (GridFS or relative path)
@@ -100,7 +99,7 @@ eventSchema.virtual("isSoldOut").get(function () {
 // =====================================================
 // 🔹 Safety Before Save
 // =====================================================
-eventSchema.pre("save", function (next) {
+eventSchema.pre("save", function () {
   if (this.bookedSeats > this.totalSeats) {
     this.bookedSeats = this.totalSeats;
   }
@@ -108,8 +107,6 @@ eventSchema.pre("save", function (next) {
   if (this.bookedSeats < 0) {
     this.bookedSeats = 0;
   }
-
-  next();
 });
 
 

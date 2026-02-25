@@ -28,7 +28,23 @@ const userSchema = new mongoose.Schema(
   enum: ['user', 'creator', 'superadmin'],
   lowercase: true,
   required: true
-}
+},
+
+    // email verification (OTP)
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    emailOtpHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    emailOtpExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   { timestamps: true }
 );

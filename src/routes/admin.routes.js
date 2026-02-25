@@ -23,6 +23,56 @@ router.get('/users', protect, authorizeRoles('superadmin'), async (req, res) => 
   }
 });
 
+// 🔹 Update User (Superadmin Only)
+router.put('/users/:id', protect, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const { name, role } = req.body || {};
+    const user = await User.findById(req.params.id).select('-password');
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    if (name != null) user.name = String(name).trim();
+    if (role != null) {
+      const r = String(role).trim().toLowerCase();
+      if (!['user', 'creator', 'superadmin'].includes(r)) {
+        return res.status(400).json({ message: 'Invalid role' });
+      }
+      user.role = r;
+    }
+
+    await user.save();
+    res.json({ message: 'User updated', user });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update user' });
+  }
+});
+
+// 🔹 Delete User (Superadmin Only)
+router.delete('/users/:id', protect, authorizeRoles('superadmin'), async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const userId = user._id;
+
+    // delete bookings made by user
+    await Booking.deleteMany({ user: userId });
+
+    // delete events created by user (if creator)
+    const createdEvents = await Event.find({ createdBy: userId }).select('_id');
+    const eventIds = createdEvents.map(e => e._id);
+    if (eventIds.length) {
+      await Booking.deleteMany({ event: { $in: eventIds } });
+      await Event.deleteMany({ _id: { $in: eventIds } });
+    }
+
+    await user.deleteOne();
+    res.json({ message: 'User deleted' });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to delete user' });
+  }
+});
+
 // 🔹 Get All Bookings (Superadmin Only)
 router.get('/bookings', protect, authorizeRoles('superadmin'), async (req, res) => {
   try {

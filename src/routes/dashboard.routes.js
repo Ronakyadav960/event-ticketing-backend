@@ -1,21 +1,33 @@
 const express = require('express');
 const router = express.Router();
+
 const { protect, authorizeRoles } = require('../middlewares/auth.middleware');
 
-// TEMP TEST ROUTES
+const {
+  getCreatorDashboard,
+  getSuperadminDashboard
+} = require('../controllers/dashboard.controller');
 
-router.get('/creator', protect, authorizeRoles('creator', 'superadmin'), (req, res) => {
-  res.json({
-    message: 'Creator dashboard working',
-    user: req.user
-  });
-});
+/* ======================================================
+   CREATOR DASHBOARD
+====================================================== */
 
-router.get('/superadmin', protect, authorizeRoles('superadmin'), (req, res) => {
-  res.json({
-    message: 'Superadmin dashboard working',
-    user: req.user
-  });
-});
+router.get(
+  '/creator',
+  protect,
+  authorizeRoles('creator', 'superadmin'),
+  getCreatorDashboard
+);
+
+/* ======================================================
+   SUPERADMIN DASHBOARD
+====================================================== */
+
+router.get(
+  '/superadmin',
+  protect,
+  authorizeRoles('superadmin'),
+  getSuperadminDashboard
+);
 
 module.exports = router;

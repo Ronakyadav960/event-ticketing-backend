@@ -165,6 +165,16 @@ exports.createCheckoutSession = async (req, res) => {
     if (!mustBeInt(Number(unitAmount)))
       return res.status(400).json({ message: 'Invalid unitAmount' });
 
+    // ✅ block booking for past events
+    const eventDoc = await Event.findById(eventId).select('date');
+    if (!eventDoc) {
+      return res.status(404).json({ message: 'Event not found' });
+    }
+    const eventDate = new Date(eventDoc.date);
+    if (!isNaN(eventDate.getTime()) && eventDate.getTime() < Date.now()) {
+      return res.status(400).json({ message: 'Cannot book past events' });
+    }
+
     const order = await StripeOrder.create({
       userId: req.user?.id || null,
       eventId,
@@ -177,9 +187,10 @@ exports.createCheckoutSession = async (req, res) => {
       status: 'PENDING',
     });
 
-    // 🔥 HARD FIXED PRODUCTION URL (No dynamic origin)
-    const BASE_URL =
-      'https://event-ticketing-frontend-hjlg.vercel.app';
+    // ✅ Frontend base URL (prefer env, fallback to first CLIENT_URL)
+    const clientEnv = (process.env.CLIENT_URL || '').split(',')[0]?.trim();
+    const BASE_URL = (process.env.FRONTEND_URL || clientEnv || 'http://localhost:4200')
+      .replace(/\/+$/, '');
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
