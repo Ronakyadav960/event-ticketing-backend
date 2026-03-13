@@ -17,6 +17,8 @@ const bookingSchema = new mongoose.Schema(
     name: { type: String, default: '' },
     email: { type: String, default: '' },
     seats: { type: Number, required: true, min: 1, default: 1 },
+    registrationTemplate: { type: String, default: 'standard' },
+    registrationData: { type: mongoose.Schema.Types.Mixed, default: {} },
 
     ticketId: {
       type: String,

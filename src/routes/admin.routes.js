@@ -7,6 +7,17 @@ const Booking = require('../models/Booking');
 
 const { protect, authorizeRoles } = require('../middlewares/auth.middleware');
 
+function parsePagination(req, defaultLimit = 10) {
+  const pageRaw = parseInt(req.query.page, 10);
+  const limitRaw = parseInt(req.query.limit, 10);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : defaultLimit;
+  const skip = (page - 1) * limit;
+  const paged = 'page' in req.query || 'limit' in req.query;
+  return { page, limit, skip, paged };
+}
+
 
 
 // =================================================
@@ -16,8 +27,22 @@ const { protect, authorizeRoles } = require('../middlewares/auth.middleware');
 // 🔹 Get All Users (Superadmin Only)
 router.get('/users', protect, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const users = await User.find().select('-password');
-    res.json(users);
+    const role = req.query.role ? String(req.query.role).trim().toLowerCase() : '';
+    const filter = role ? { role } : {};
+    const { page, limit, skip, paged } = parsePagination(req);
+
+    if (!paged) {
+      const users = await User.find(filter).select('-password');
+      return res.json(users);
+    }
+
+    const [total, users] = await Promise.all([
+      User.countDocuments(filter),
+      User.find(filter).select('-password').sort({ createdAt: -1 }).skip(skip).limit(limit)
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    return res.json({ data: users, page, limit, total, totalPages });
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch users' });
   }
@@ -76,10 +101,27 @@ router.delete('/users/:id', protect, authorizeRoles('superadmin'), async (req, r
 // 🔹 Get All Bookings (Superadmin Only)
 router.get('/bookings', protect, authorizeRoles('superadmin'), async (req, res) => {
   try {
-    const bookings = await Booking.find()
-      .populate('user', 'name email')
-      .populate('event', 'title');
-    res.json(bookings);
+    const { page, limit, skip, paged } = parsePagination(req);
+
+    if (!paged) {
+      const bookings = await Booking.find()
+        .populate('user', 'name email')
+        .populate('event', 'title');
+      return res.json(bookings);
+    }
+
+    const [total, bookings] = await Promise.all([
+      Booking.countDocuments(),
+      Booking.find()
+        .populate('user', 'name email')
+        .populate('event', 'title')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    return res.json({ data: bookings, page, limit, total, totalPages });
   } catch (err) {
     res.status(500).json({ message: 'Failed to fetch bookings' });
   }

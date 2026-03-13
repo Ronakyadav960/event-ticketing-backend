@@ -56,12 +56,27 @@ exports.getCreatorDashboard = async (req, res) => {
       if (to) bookingMatch.createdAt.$lte = to;
     }
 
-    const bookings = await Booking.find(bookingMatch).populate('event');
+    const bookings = await Booking.find(bookingMatch)
+      .populate('event', 'title price totalSeats')
+      .populate('user', 'name email');
 
     let revenue = 0;
     let seatsBooked = 0;
 
     const perEventMap = {};
+
+    // Seed all events so zero-booking events still appear
+    myEvents.forEach((ev) => {
+      const eid = String(ev._id);
+      perEventMap[eid] = {
+        eventId: eid,
+        title: ev.title,
+        bookings: 0,
+        seatsBooked: 0,
+        totalSeats: ev.totalSeats ?? 0,
+        revenue: 0,
+      };
+    });
 
     bookings.forEach(b => {
       const eid = String(b.event._id);
@@ -72,6 +87,7 @@ exports.getCreatorDashboard = async (req, res) => {
           title: b.event.title,
           bookings: 0,
           seatsBooked: 0,
+          totalSeats: b.event.totalSeats ?? 0,
           revenue: 0,
         };
       }
@@ -120,6 +136,16 @@ exports.getCreatorDashboard = async (req, res) => {
       { $sort: { month: 1 } }
     ]);
 
+    const bookingSummaries = bookings.map((b) => ({
+      _id: b._id,
+      event: b.event,
+      user: b.user,
+      name: b.name,
+      email: b.email,
+      seats: b.seats,
+      createdAt: b.createdAt
+    }));
+
     res.json({
       totals: {
         events: myEvents.length,
@@ -129,7 +155,8 @@ exports.getCreatorDashboard = async (req, res) => {
       },
       topEvent: perEvent[0] || null,
       perEvent,
-      monthlyTrend
+      monthlyTrend,
+      bookings: bookingSummaries
     });
 
   } catch (err) {

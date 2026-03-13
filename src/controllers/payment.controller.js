@@ -77,6 +77,8 @@ async function finalizePaidOrder({ order, session }) {
       name: order.name || '',
       email: order.email || '',
       seats,
+      registrationTemplate: order.registrationTemplate || 'standard',
+      registrationData: order.registrationData || {},
       ticketId,
       paymentStatus: 'PAID',
       stripeSessionId: session.id,
@@ -157,6 +159,8 @@ exports.createCheckoutSession = async (req, res) => {
       currency = 'inr',
       name,
       email,
+      registrationTemplate,
+      registrationData,
     } = req.body;
 
     if (!mustBeInt(quantity))
@@ -181,6 +185,8 @@ exports.createCheckoutSession = async (req, res) => {
       ticketName,
       name,
       email,
+      registrationTemplate: registrationTemplate || 'standard',
+      registrationData: registrationData || {},
       quantity,
       unitAmount: Number(unitAmount),
       currency: currency.toLowerCase(),

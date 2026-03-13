@@ -10,6 +10,8 @@ const StripeOrderSchema = new mongoose.Schema(
     // ✅ store buyer info (optional)
     name: { type: String, default: '' },
     email: { type: String, default: '' },
+    registrationTemplate: { type: String, default: 'standard' },
+    registrationData: { type: mongoose.Schema.Types.Mixed, default: {} },
 
     // quantity = seats
     quantity: { type: Number, required: true },

@@ -32,6 +32,9 @@ function getBucket() {
 // Get all events
 router.get('/', eventController.getAllEvents);
 
+// Get categories
+router.get('/categories', eventController.getCategories);
+
 // Get single event
 router.get('/:id', eventController.getEventById);
 

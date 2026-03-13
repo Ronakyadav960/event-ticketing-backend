@@ -20,7 +20,7 @@ exports.getByTicketId = async (req, res) => {
 // CREATE BOOKING 
 exports.createBooking = async (req, res) => {
   try {
-    const { eventId, name, email, seats } = req.body;
+    const { eventId, name, email, seats, registrationTemplate, registrationData } = req.body;
 
     // ✅ auth required: user must exist from middleware
     const userId = req.user?.id || req.user?._id;
@@ -56,6 +56,8 @@ exports.createBooking = async (req, res) => {
       seats: seatCount,
       name: name || '',
       email: email || '',
+      registrationTemplate: registrationTemplate || 'standard',
+      registrationData: registrationData || {},
       ticketId,
     });
 

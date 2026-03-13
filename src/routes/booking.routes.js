@@ -6,6 +6,17 @@ const Event = require('../models/Event');
 const { protect } = require('../middlewares/auth.middleware');
 
 // ✅ helper: generate unique ticket id
+function parsePagination(req, defaultLimit = 10) {
+  const pageRaw = parseInt(req.query.page, 10);
+  const limitRaw = parseInt(req.query.limit, 10);
+  const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+  const limit =
+    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 100) : defaultLimit;
+  const skip = (page - 1) * limit;
+  const paged = 'page' in req.query || 'limit' in req.query;
+  return { page, limit, skip, paged };
+}
+
 function generateTicketId() {
   return `TKT-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`.toUpperCase();
 }
@@ -18,7 +29,7 @@ function generateTicketId() {
 // ==========================
 router.post('/', protect, async (req, res) => {
   try {
-    const { eventId, name, email, seats } = req.body;
+    const { eventId, name, email, seats, registrationTemplate, registrationData } = req.body;
 
     if (!eventId) return res.status(400).json({ message: 'eventId is required' });
     if (!name) return res.status(400).json({ message: 'name is required' });
@@ -51,6 +62,8 @@ router.post('/', protect, async (req, res) => {
       name,
       email,
       seats: seatCount,
+      registrationTemplate: registrationTemplate || 'standard',
+      registrationData: registrationData || {},
       ticketId,
       paymentStatus: 'PAID', // manual booking assumes paid; adjust if needed
     });
@@ -85,7 +98,8 @@ router.get('/ticket/:ticketId', protect, async (req, res) => {
 
     // ✅ Authorization: allow owner or admin
     const isOwner = String(booking.user?._id || booking.user) === String(req.user.id);
-    const isAdmin = !!req.user?.isAdmin || req.user?.role === 'admin';
+    const isAdmin =
+      !!req.user?.isAdmin || req.user?.role === 'admin' || req.user?.role === 'superadmin';
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ message: 'Forbidden' });
     }
@@ -118,15 +132,31 @@ router.get('/my', protect, async (req, res) => {
 // ==========================
 router.get('/', protect, async (req, res) => {
   try {
-    const isAdmin = !!req.user?.isAdmin || req.user?.role === 'admin';
-
+    const isAdmin =
+      !!req.user?.isAdmin || req.user?.role === 'admin' || req.user?.role === 'superadmin';
     const query = isAdmin ? {} : { user: req.user.id };
+    const { page, limit, skip, paged } = parsePagination(req);
 
-    const bookings = await Booking.find(query)
-      .populate('event', 'title date venue price')
-      .populate('user', 'name email');
+    if (!paged) {
+      const bookings = await Booking.find(query)
+        .populate('event', 'title date venue price')
+        .populate('user', 'name email');
 
-    return res.json(bookings);
+      return res.json(bookings);
+    }
+
+    const [total, bookings] = await Promise.all([
+      Booking.countDocuments(query),
+      Booking.find(query)
+        .populate('event', 'title date venue price')
+        .populate('user', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+    ]);
+
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    return res.json({ data: bookings, page, limit, total, totalPages });
   } catch (err) {
     console.error('bookings error:', err);
     return res.status(500).json({ message: 'Failed to load bookings', error: err.message });
@@ -146,7 +176,8 @@ router.get('/:id', protect, async (req, res) => {
     if (!booking) return res.status(404).json({ message: 'Booking not found' });
 
     const isOwner = String(booking.user?._id || booking.user) === String(req.user.id);
-    const isAdmin = !!req.user?.isAdmin || req.user?.role === 'admin';
+    const isAdmin =
+      !!req.user?.isAdmin || req.user?.role === 'admin' || req.user?.role === 'superadmin';
     if (!isOwner && !isAdmin) {
       return res.status(403).json({ message: 'Forbidden' });
     }
@@ -158,4 +189,42 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
+// ==========================
+// DELETE BOOKING (ADMIN OR OWNER)
+// DELETE /api/bookings/:id
+// ==========================
+router.delete('/:id', protect, async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ message: 'Booking not found' });
+
+    const isOwner = String(booking.user) === String(req.user.id);
+    const isAdmin = !!req.user?.isAdmin || req.user?.role === 'admin' || req.user?.role === 'superadmin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+
+    // decrement booked seats on event (never below 0)
+    const seatsToRelease = Math.max(Number(booking.seats || 0), 0);
+    if (seatsToRelease > 0) {
+      await Event.findByIdAndUpdate(
+        booking.event,
+        { $inc: { bookedSeats: -seatsToRelease } },
+        { new: true }
+      );
+    }
+
+    await booking.deleteOne();
+    return res.json({ message: 'Booking deleted' });
+  } catch (err) {
+    console.error('delete booking error:', err);
+    return res.status(500).json({ message: 'Failed to delete booking', error: err.message });
+  }
+});
+
 module.exports = router;
+
+
+
+
+

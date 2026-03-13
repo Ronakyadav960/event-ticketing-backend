@@ -33,6 +33,18 @@ const eventSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    category: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 80,
+    },
+    locationType: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 40,
+    },
 
     totalSeats: {
       type: Number,
@@ -63,6 +75,38 @@ const eventSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       default: null,
     },
+
+    registrationTemplate: {
+      type: String,
+      default: "standard",
+    },
+
+    designTemplate: {
+      type: String,
+      default: "clean-hero",
+    },
+    imagePreset: {
+      type: String,
+      default: "preset-a",
+    },
+
+    designConfig: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+
+    customFields: [
+      {
+        label: { type: String, required: true, maxlength: 80 },
+        type: {
+          type: String,
+          enum: ["text", "email", "phone", "number", "textarea", "select", "checkbox"],
+          default: "text",
+        },
+        required: { type: Boolean, default: false },
+        options: [{ type: String }],
+      },
+    ],
   },
   {
     timestamps: true,
