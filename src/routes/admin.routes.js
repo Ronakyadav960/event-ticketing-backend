@@ -6,6 +6,8 @@ const Event = require('../models/Event');
 const Booking = require('../models/Booking');
 
 const { protect, authorizeRoles } = require('../middlewares/auth.middleware');
+const heroUpload = require('../middlewares/heroUpload.middleware');
+const heroCtrl = require('../controllers/heroImage.controller');
 
 function parsePagination(req, defaultLimit = 10) {
   const pageRaw = parseInt(req.query.page, 10);
@@ -200,5 +202,24 @@ router.get('/my-bookings', protect, authorizeRoles('creator'), async (req, res) 
     res.status(500).json({ message: 'Failed to fetch bookings' });
   }
 });
+
+// =================================================
+// ================= HERO IMAGES ===================
+// =================================================
+
+// Superadmin Only: list current hero images
+router.get('/hero-images', protect, authorizeRoles('superadmin'), heroCtrl.listAdmin);
+
+// Superadmin Only: upload single hero image (field: image)
+router.post(
+  '/hero-images',
+  protect,
+  authorizeRoles('superadmin'),
+  heroUpload.single('image'),
+  heroCtrl.upload
+);
+
+// Superadmin Only: delete hero image
+router.delete('/hero-images/:id', protect, authorizeRoles('superadmin'), heroCtrl.remove);
 
 module.exports = router;

@@ -31,6 +31,10 @@ const bookingSchema = new mongoose.Schema(
     stripeSessionId: { type: String, default: null },
     stripePaymentIntentId: { type: String, default: null },
 
+    // New: selected show date/time (for multi-day events)
+    // Stored as a single datetime for easy display/filtering.
+    showAt: { type: Date, default: null },
+
     bookedAt: {
       type: Date,
       default: Date.now,

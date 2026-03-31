@@ -28,19 +28,11 @@ app.use(
 );
 
 /* ======================================================
-   STRIPE RAW BODY (if enabled)
+   STRIPE WEBHOOK RAW BODY
+   Must be registered BEFORE express.json(), otherwise signature verification fails.
 ====================================================== */
 
-const STRIPE_ENABLED =
-  process.env.STRIPE_SECRET_KEY &&
-  process.env.STRIPE_WEBHOOK_SECRET;
-
-if (STRIPE_ENABLED) {
-  app.use(
-    '/api/payments/webhook',
-    express.raw({ type: 'application/json' })
-  );
-}
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 /* ======================================================
    BODY PARSERS
@@ -81,6 +73,7 @@ app.use('/api/bookings', require('./routes/booking.routes'));
 app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/payments', require('./routes/payment.routes'));
+app.use('/api/hero-images', require('./routes/heroImage.routes'));
 
 /* ======================================================
    HEALTH CHECK

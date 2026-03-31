@@ -42,6 +42,70 @@ const DEFAULT_CATEGORIES = [
   'Sports',
 ];
 
+function parseDateOnly(input) {
+  const s = String(input || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function parseShowTimes(input) {
+  if (!input) return [];
+
+  let raw = input;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    try {
+      raw = JSON.parse(trimmed);
+    } catch {
+      raw = trimmed.split(',').map((t) => t.trim());
+    }
+  }
+
+  const list = Array.isArray(raw) ? raw : [raw];
+
+  const seen = new Set();
+  const out = [];
+
+  for (const item of list) {
+    const t = String(item || '').trim();
+    if (!t) continue;
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+
+  return out;
+}
+
+function toHHmmFromDateUTC(d) {
+  if (!d) return '';
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function combineUtcDateAndTime(dateOnly, hhmm) {
+  if (!dateOnly || !hhmm) return null;
+  const [hRaw, mRaw] = String(hhmm).split(':');
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  const d = new Date(
+    Date.UTC(
+      dateOnly.getUTCFullYear(),
+      dateOnly.getUTCMonth(),
+      dateOnly.getUTCDate(),
+      h,
+      m,
+      0,
+      0
+    )
+  );
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 // =======================
 // Upload Buffer to GridFS
 // =======================
@@ -78,6 +142,9 @@ exports.createEvent = async (req, res) => {
       title,
       description,
       date,
+      startDate,
+      endDate,
+      showTimes,
       venue,
       price,
       totalSeats,
@@ -90,9 +157,37 @@ exports.createEvent = async (req, res) => {
       customFields,
     } = req.body;
 
-    if (!title || !date || !venue || price == null || totalSeats == null || !category) {
+    if (!title || !venue || price == null || totalSeats == null || !category) {
       return res.status(400).json({ message: 'All fields are required' });
     }
+
+    const parsedStartDate = parseDateOnly(startDate);
+    const parsedEndDate = parseDateOnly(endDate);
+    const parsedShowTimes = parseShowTimes(showTimes);
+
+    let legacyDate = date ? new Date(date) : null;
+    if (legacyDate && Number.isNaN(legacyDate.getTime())) legacyDate = null;
+
+    // Backward compatibility: allow old payload with only `date`
+    const hasSchedule = Boolean(parsedStartDate && parsedEndDate);
+
+    if (hasSchedule) {
+      if (parsedEndDate.getTime() < parsedStartDate.getTime()) {
+        return res.status(400).json({ message: 'endDate must be after startDate' });
+      }
+
+      if (!legacyDate && parsedShowTimes.length) {
+        legacyDate = combineUtcDateAndTime(parsedStartDate, parsedShowTimes[0]);
+      }
+    }
+
+    if (!legacyDate) {
+      return res.status(400).json({ message: 'date missing/invalid' });
+    }
+
+    const scheduleStart = hasSchedule ? parsedStartDate : parseDateOnly(legacyDate.toISOString().slice(0, 10));
+    const scheduleEnd = hasSchedule ? parsedEndDate : scheduleStart;
+    const times = parsedShowTimes.length ? parsedShowTimes : [toHHmmFromDateUTC(legacyDate)];
 
     let imageFileId = null;
 
@@ -106,7 +201,10 @@ exports.createEvent = async (req, res) => {
     const event = await Event.create({
       title: String(title).trim(),
       description: description ? String(description).trim() : '',
-      date: new Date(date),
+      date: legacyDate,
+      startDate: scheduleStart,
+      endDate: scheduleEnd,
+      showTimes: times,
       venue: String(venue).trim(),
       price: Number(price),
       totalSeats: Number(totalSeats),
@@ -252,7 +350,38 @@ exports.updateEvent = async (req, res) => {
 
     if (req.body.title != null) event.title = String(req.body.title).trim();
     if (req.body.description != null) event.description = String(req.body.description).trim();
-    if (req.body.date != null) event.date = new Date(req.body.date);
+
+    // Schedule fields (optional)
+    const parsedStartDate = parseDateOnly(req.body.startDate);
+    const parsedEndDate = parseDateOnly(req.body.endDate);
+    const parsedShowTimes = parseShowTimes(req.body.showTimes);
+
+    if (parsedStartDate && parsedEndDate && parsedEndDate.getTime() < parsedStartDate.getTime()) {
+      return res.status(400).json({ message: 'endDate must be after startDate' });
+    }
+
+    if (req.body.date != null) {
+      const d = new Date(req.body.date);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ message: 'Invalid date' });
+      event.date = d;
+    }
+
+    if (parsedStartDate) event.startDate = parsedStartDate;
+    if (parsedEndDate) event.endDate = parsedEndDate;
+    if (parsedShowTimes.length) event.showTimes = parsedShowTimes;
+
+    // If schedule is sent without `date`, keep legacy date aligned with startDate + first showTime (fallback)
+    if (
+      (parsedStartDate || parsedEndDate || parsedShowTimes.length) &&
+      req.body.date == null &&
+      event.startDate &&
+      Array.isArray(event.showTimes) &&
+      event.showTimes.length
+    ) {
+      const combined = combineUtcDateAndTime(event.startDate, event.showTimes[0]);
+      if (combined) event.date = combined;
+    }
+
     if (req.body.venue != null) event.venue = String(req.body.venue).trim();
     if (req.body.price != null) event.price = Number(req.body.price);
     if (req.body.totalSeats != null) event.totalSeats = Number(req.body.totalSeats);

@@ -5,6 +5,64 @@ const Booking = require('../models/Booking');
 const Event = require('../models/Event');
 const { protect } = require('../middlewares/auth.middleware');
 
+function parseShowAt(input) {
+  if (!input) return null;
+  const d = new Date(input);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function getEventTimeZone() {
+  return (process.env.EVENT_TIMEZONE || 'Asia/Kolkata').trim() || 'Asia/Kolkata';
+}
+
+function yyyyMmDdInTz(d, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(d);
+
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+function hhmmInTz(d, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.hour}:${map.minute}`;
+}
+
+function isShowTimeAllowed(eventDoc, showAt) {
+  if (!eventDoc || !showAt) return true;
+
+  const start = eventDoc.startDate ? new Date(eventDoc.startDate) : null;
+  const end = eventDoc.endDate ? new Date(eventDoc.endDate) : null;
+  const times = Array.isArray(eventDoc.showTimes) ? eventDoc.showTimes : [];
+  const tz = getEventTimeZone();
+
+  if (start && !Number.isNaN(start.getTime())) {
+    const showDateOnly = new Date(`${yyyyMmDdInTz(showAt, tz)}T00:00:00.000Z`);
+    if (showDateOnly.getTime() < start.getTime()) return false;
+    if (end && !Number.isNaN(end.getTime()) && showDateOnly.getTime() > end.getTime()) {
+      return false;
+    }
+  }
+
+  if (times.length) {
+    const hhmm = hhmmInTz(showAt, tz);
+    if (!times.includes(hhmm)) return false;
+  }
+
+  return true;
+}
+
 // ✅ helper: generate unique ticket id
 function parsePagination(req, defaultLimit = 10) {
   const pageRaw = parseInt(req.query.page, 10);
@@ -29,7 +87,7 @@ function generateTicketId() {
 // ==========================
 router.post('/', protect, async (req, res) => {
   try {
-    const { eventId, name, email, seats, registrationTemplate, registrationData } = req.body;
+    const { eventId, name, email, seats, registrationTemplate, registrationData, showAt } = req.body;
 
     if (!eventId) return res.status(400).json({ message: 'eventId is required' });
     if (!name) return res.status(400).json({ message: 'name is required' });
@@ -38,6 +96,24 @@ router.post('/', protect, async (req, res) => {
     const seatCount = Number(seats);
     if (!seatCount || seatCount < 1) {
       return res.status(400).json({ message: 'seats must be >= 1' });
+    }
+
+    const showAtDate = parseShowAt(showAt);
+
+    const eventDoc = await Event.findById(eventId).select('date startDate endDate showTimes');
+    if (!eventDoc) return res.status(404).json({ message: 'Event not found' });
+
+    const effectiveShowAt = showAtDate || (eventDoc.date ? new Date(eventDoc.date) : null);
+    if (!effectiveShowAt || Number.isNaN(effectiveShowAt.getTime())) {
+      return res.status(400).json({ message: 'Invalid show date/time' });
+    }
+
+    if (effectiveShowAt.getTime() < Date.now()) {
+      return res.status(400).json({ message: 'Cannot book past events' });
+    }
+
+    if (!isShowTimeAllowed(eventDoc, effectiveShowAt)) {
+      return res.status(400).json({ message: 'Selected show date/time not available' });
     }
 
     // ✅ ATOMIC: increment bookedSeats only if seats are available
@@ -66,6 +142,7 @@ router.post('/', protect, async (req, res) => {
       registrationData: registrationData || {},
       ticketId,
       paymentStatus: 'PAID', // manual booking assumes paid; adjust if needed
+      showAt: effectiveShowAt,
     });
 
     return res.status(201).json({

@@ -13,6 +13,9 @@ const StripeOrderSchema = new mongoose.Schema(
     registrationTemplate: { type: String, default: 'standard' },
     registrationData: { type: mongoose.Schema.Types.Mixed, default: {} },
 
+    // New: selected show datetime (stored so webhook finalization uses same show)
+    showAt: { type: Date, default: null },
+
     // quantity = seats
     quantity: { type: Number, required: true },
     unitAmount: { type: Number, required: true }, // smallest unit: paise

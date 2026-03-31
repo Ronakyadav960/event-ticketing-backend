@@ -16,9 +16,28 @@ const eventSchema = new mongoose.Schema(
       maxlength: 2000,
     },
 
+    // Primary (legacy) datetime for the event (kept for backward compatibility)
     date: {
       type: Date,
       required: true,
+    },
+
+    // New: date range + show times (BookMyShow-style)
+    // startDate/endDate are stored as UTC midnight of selected dates
+    startDate: {
+      type: Date,
+      default: null,
+    },
+
+    endDate: {
+      type: Date,
+      default: null,
+    },
+
+    // Array of "HH:mm" strings (24h)
+    showTimes: {
+      type: [String],
+      default: [],
     },
 
     venue: {
@@ -120,6 +139,7 @@ const eventSchema = new mongoose.Schema(
 // =====================================================
 eventSchema.index({ createdBy: 1 });
 eventSchema.index({ date: 1 });
+eventSchema.index({ startDate: 1, endDate: 1 });
 
 
 // =====================================================
@@ -150,6 +170,30 @@ eventSchema.pre("save", function () {
 
   if (this.bookedSeats < 0) {
     this.bookedSeats = 0;
+  }
+
+  // Backward compatibility: if start/end dates are not set, derive from `date`
+  if (!this.startDate && this.date) {
+    const d = new Date(this.date);
+    if (!Number.isNaN(d.getTime())) {
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      this.startDate = new Date(`${y}-${m}-${day}T00:00:00.000Z`);
+    }
+  }
+
+  if (!this.endDate && this.startDate) {
+    this.endDate = this.startDate;
+  }
+
+  if ((!this.showTimes || !this.showTimes.length) && this.date) {
+    const d = new Date(this.date);
+    if (!Number.isNaN(d.getTime())) {
+      const hh = String(d.getUTCHours()).padStart(2, '0');
+      const mm = String(d.getUTCMinutes()).padStart(2, '0');
+      this.showTimes = [`${hh}:${mm}`];
+    }
   }
 });
 
