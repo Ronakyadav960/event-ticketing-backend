@@ -6,5 +6,7 @@ const heroCtrl = require('../controllers/heroImage.controller');
 // Public: used on Home/Events page carousel
 router.get('/', heroCtrl.listPublic);
 
-module.exports = router;
+// Public: serve image bytes (GridFS-backed)
+router.get('/:id/image', heroCtrl.getImage);
 
+module.exports = router;
