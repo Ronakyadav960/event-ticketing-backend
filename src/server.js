@@ -74,6 +74,7 @@ app.use('/api/admin', require('./routes/admin.routes'));
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
 app.use('/api/payments', require('./routes/payment.routes'));
 app.use('/api/hero-images', require('./routes/heroImage.routes'));
+app.use('/api/movies', require('./routes/movie.routes'));
 
 /* ======================================================
    HEALTH CHECK

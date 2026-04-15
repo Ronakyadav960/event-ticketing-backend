@@ -126,6 +126,47 @@ const eventSchema = new mongoose.Schema(
         options: [{ type: String }],
       },
     ],
+
+    sourceType: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 40,
+    },
+
+    sourceMovieId: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 40,
+    },
+
+    movieMeta: {
+      tags: {
+        type: String,
+        default: '',
+      },
+      releaseDate: {
+        type: String,
+        default: '',
+      },
+      posterPath: {
+        type: String,
+        default: '',
+      },
+      posterUrl: {
+        type: String,
+        default: '',
+      },
+      voteAverage: {
+        type: Number,
+        default: 0,
+      },
+      popularity: {
+        type: Number,
+        default: 0,
+      },
+    },
   },
   {
     timestamps: true,
@@ -140,6 +181,7 @@ const eventSchema = new mongoose.Schema(
 eventSchema.index({ createdBy: 1 });
 eventSchema.index({ date: 1 });
 eventSchema.index({ startDate: 1, endDate: 1 });
+eventSchema.index({ sourceMovieId: 1 });
 
 
 // =====================================================

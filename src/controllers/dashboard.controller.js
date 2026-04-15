@@ -71,9 +71,17 @@ exports.getCreatorDashboard = async (req, res) => {
       perEventMap[eid] = {
         eventId: eid,
         title: ev.title,
+        date: ev.date,
+        startDate: ev.startDate,
+        endDate: ev.endDate,
+        showTimes: ev.showTimes,
+        venue: ev.venue,
+        price: ev.price ?? 0,
         bookings: 0,
         seatsBooked: 0,
         totalSeats: ev.totalSeats ?? 0,
+        bookedSeats: ev.bookedSeats ?? 0,
+        category: ev.category,
         revenue: 0,
       };
     });
@@ -85,9 +93,17 @@ exports.getCreatorDashboard = async (req, res) => {
         perEventMap[eid] = {
           eventId: eid,
           title: b.event.title,
+          date: null,
+          startDate: null,
+          endDate: null,
+          showTimes: [],
+          venue: '',
+          price: b.event.price ?? 0,
           bookings: 0,
           seatsBooked: 0,
           totalSeats: b.event.totalSeats ?? 0,
+          bookedSeats: 0,
+          category: '',
           revenue: 0,
         };
       }

@@ -31,6 +31,47 @@ function escapeRegex(input) {
   return String(input || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizeMovieId(input) {
+  return String(input || '').trim();
+}
+
+function isValidObjectId(value) {
+  if (!value) return false;
+  return mongoose.Types.ObjectId.isValid(String(value));
+}
+
+function sanitizeEventDocumentForSave(event) {
+  if (!event) return;
+
+  if (event.imageFileId && !isValidObjectId(event.imageFileId)) {
+    event.imageFileId = null;
+  }
+
+  if (!event.imageUrl) {
+    event.imageUrl = '';
+  }
+
+  if (!Array.isArray(event.showTimes)) {
+    event.showTimes = [];
+  }
+}
+
+function getReadableSaveError(error) {
+  if (!error) return 'Update failed';
+
+  if (error.name === 'ValidationError' && error.errors) {
+    const firstError = Object.values(error.errors)[0];
+    return firstError?.message || error.message || 'Validation failed';
+  }
+
+  if (error.name === 'CastError') {
+    const field = error.path || 'field';
+    return `Invalid value for ${field}.`;
+  }
+
+  return error.message || 'Update failed';
+}
+
 const DEFAULT_CATEGORIES = [
   'Conference',
   'Workshop',
@@ -240,12 +281,31 @@ exports.createEvent = async (req, res) => {
 exports.getAllEvents = async (req, res) => {
   try {
     const rawCategory = String(req.query.category || '').trim();
+    const rawQuery = String(req.query.q || req.query.query || '').trim();
+    const rawSourceMovieId = normalizeMovieId(req.query.sourceMovieId);
+    const rawSourceType = String(req.query.sourceType || '').trim();
     const category =
       rawCategory && rawCategory.toLowerCase() !== 'all' ? rawCategory : '';
 
     const filter = {};
     if (category) {
       filter.category = new RegExp(`^${escapeRegex(category)}$`, 'i');
+    }
+    if (rawSourceMovieId) {
+      filter.sourceMovieId = rawSourceMovieId;
+    }
+    if (rawSourceType) {
+      filter.sourceType = new RegExp(`^${escapeRegex(rawSourceType)}$`, 'i');
+    }
+    if (rawQuery) {
+      const queryRegex = new RegExp(escapeRegex(rawQuery), 'i');
+      filter.$or = [
+        { title: queryRegex },
+        { venue: queryRegex },
+        { category: queryRegex },
+        { description: queryRegex },
+        { sourceMovieId: queryRegex },
+      ];
     }
 
     const pageRaw = parseInt(req.query.page, 10);
@@ -271,6 +331,25 @@ exports.getAllEvents = async (req, res) => {
   } catch (error) {
     console.error('GET ALL EVENTS ERROR ❌', error);
     return res.status(500).json({ message: 'Failed to fetch events' });
+  }
+};
+
+exports.getMovieEventBySource = async (req, res) => {
+  try {
+    const sourceMovieId = normalizeMovieId(req.params.movieId || req.query.sourceMovieId);
+    if (!sourceMovieId) {
+      return res.status(400).json({ message: 'sourceMovieId is required' });
+    }
+
+    const event = await Event.findOne({ sourceMovieId }).sort({ updatedAt: -1, createdAt: -1 });
+    if (!event) {
+      return res.status(404).json({ message: 'Movie event not found' });
+    }
+
+    return res.json(event);
+  } catch (error) {
+    console.error('GET MOVIE EVENT BY SOURCE ERROR', error);
+    return res.status(500).json({ message: 'Failed to fetch movie event' });
   }
 };
 
@@ -348,8 +427,10 @@ exports.updateEvent = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to update this event' });
     }
 
-    if (req.body.title != null) event.title = String(req.body.title).trim();
-    if (req.body.description != null) event.description = String(req.body.description).trim();
+    const updates = {};
+
+    if (req.body.title != null) updates.title = String(req.body.title).trim();
+    if (req.body.description != null) updates.description = String(req.body.description).trim();
 
     // Schedule fields (optional)
     const parsedStartDate = parseDateOnly(req.body.startDate);
@@ -363,47 +444,59 @@ exports.updateEvent = async (req, res) => {
     if (req.body.date != null) {
       const d = new Date(req.body.date);
       if (Number.isNaN(d.getTime())) return res.status(400).json({ message: 'Invalid date' });
-      event.date = d;
+      updates.date = d;
     }
 
-    if (parsedStartDate) event.startDate = parsedStartDate;
-    if (parsedEndDate) event.endDate = parsedEndDate;
-    if (parsedShowTimes.length) event.showTimes = parsedShowTimes;
+    if (parsedStartDate) updates.startDate = parsedStartDate;
+    if (parsedEndDate) updates.endDate = parsedEndDate;
+    if (parsedShowTimes.length) updates.showTimes = parsedShowTimes;
+
+    const nextStartDate = parsedStartDate || event.startDate;
+    const nextShowTimes = parsedShowTimes.length ? parsedShowTimes : event.showTimes;
 
     // If schedule is sent without `date`, keep legacy date aligned with startDate + first showTime (fallback)
     if (
       (parsedStartDate || parsedEndDate || parsedShowTimes.length) &&
       req.body.date == null &&
-      event.startDate &&
-      Array.isArray(event.showTimes) &&
-      event.showTimes.length
+      nextStartDate &&
+      Array.isArray(nextShowTimes) &&
+      nextShowTimes.length
     ) {
-      const combined = combineUtcDateAndTime(event.startDate, event.showTimes[0]);
-      if (combined) event.date = combined;
+      const combined = combineUtcDateAndTime(nextStartDate, nextShowTimes[0]);
+      if (combined) updates.date = combined;
     }
 
-    if (req.body.venue != null) event.venue = String(req.body.venue).trim();
-    if (req.body.price != null) event.price = Number(req.body.price);
-    if (req.body.totalSeats != null) event.totalSeats = Number(req.body.totalSeats);
-    if (req.body.category != null) event.category = String(req.body.category).trim();
-    if (req.body.locationType != null) event.locationType = String(req.body.locationType).trim();
-    if (req.body.registrationTemplate != null) event.registrationTemplate = String(req.body.registrationTemplate);
-    if (req.body.designTemplate != null) event.designTemplate = String(req.body.designTemplate);
-    if (req.body.imagePreset != null) event.imagePreset = String(req.body.imagePreset);
-    if (req.body.designConfig != null) event.designConfig = parseJsonObject(req.body.designConfig);
-    if (req.body.customFields != null) event.customFields = parseCustomFields(req.body.customFields);
+    if (req.body.venue != null) updates.venue = String(req.body.venue).trim();
+    if (req.body.price != null) updates.price = Number(req.body.price);
+    if (req.body.totalSeats != null) updates.totalSeats = Number(req.body.totalSeats);
+    if (req.body.category != null) updates.category = String(req.body.category).trim();
+    if (req.body.locationType != null) updates.locationType = String(req.body.locationType).trim();
+    if (req.body.registrationTemplate != null) updates.registrationTemplate = String(req.body.registrationTemplate);
+    if (req.body.designTemplate != null) updates.designTemplate = String(req.body.designTemplate);
+    if (req.body.imagePreset != null) updates.imagePreset = String(req.body.imagePreset);
+    if (req.body.designConfig != null) updates.designConfig = parseJsonObject(req.body.designConfig);
+    if (req.body.customFields != null) updates.customFields = parseCustomFields(req.body.customFields);
     if (req.file) {
       const newId = await uploadBufferToGridFS(req.file);
-      event.imageFileId = newId;
-      event.imageUrl = buildImagePath(event._id);
+      updates.imageFileId = newId;
+      updates.imageUrl = buildImagePath(event._id);
     }
 
-    await event.save();
-    return res.json(event);
+    const updatedEvent = await Event.findByIdAndUpdate(
+      req.params.id,
+      { $set: updates },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    sanitizeEventDocumentForSave(updatedEvent);
+    return res.json(updatedEvent);
 
   } catch (error) {
     console.error('UPDATE EVENT ERROR ❌', error);
-    return res.status(400).json({ message: 'Update failed' });
+    return res.status(400).json({ message: getReadableSaveError(error) });
   }
 };
 

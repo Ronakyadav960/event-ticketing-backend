@@ -35,6 +35,9 @@ router.get('/', eventController.getAllEvents);
 // Get categories
 router.get('/categories', eventController.getCategories);
 
+// Get single movie-backed event by source movie id
+router.get('/movie-source/:movieId', eventController.getMovieEventBySource);
+
 // Get single event
 router.get('/:id', eventController.getEventById);
 
